@@ -1,0 +1,38 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: billing-assinaturas
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5435}/${DB_NAME:billing}}
+    username: ${DB_USER:billing}
+    password: ${DB_PASSWORD:billing}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  mvc:
+    problemdetails:
+      enabled: true
+
+billing:
+  jobs:
+    enabled: true
+    # ciclo de cobranca: todo dia as 03:00
+    cycle-cron: "0 0 3 * * *"
+    # retry de faturas e checagem de cobrancas sem resposta: a cada 5 minutos
+    retry-interval-ms: 300000
+  retry:
+    # espera entre as tentativas: 24h, 72h e 120h depois da falha (4 tentativas no total)
+    delays-hours: 24,72,120
+    # cobranca enviada ao gateway sem webhook de resposta ha mais que isso e dada como falha
+    pending-timeout: 24h
+  webhook:
+    secret: ${WEBHOOK_SECRET:dev-secret-troque-em-producao}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

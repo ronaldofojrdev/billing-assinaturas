@@ -1,0 +1,34 @@
+# Blueprint do Render (https://render.com/docs/blueprint-spec). Ainda nao publiquei: precisa da minha conta.
+services:
+  - type: web
+    name: billing-assinaturas
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: billing-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: billing-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: billing-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: billing-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: billing-db
+          property: password
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+databases:
+  - name: billing-db
+    plan: free

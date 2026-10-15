@@ -1,0 +1,106 @@
+### Fluxo completo da API de billing.
+### Abra no IntelliJ (HTTP Client) ou no VS Code (extensao REST Client) com a API rodando em localhost:8083.
+### Rode as requisicoes de cima para baixo: cada uma usa o resultado da anterior.
+
+@host = http://localhost:8083
+@webhookSecret = segredo-local
+
+### 1. Cria um plano mensal
+# @name plan
+POST {{host}}/plans
+Content-Type: application/json
+
+{
+  "name": "Pro {{$timestamp}}",
+  "price": 49.90,
+  "interval": "MONTHLY"
+}
+
+@planId = {{plan.response.body.$.id}}
+
+### 2. Lista os planos disponiveis
+GET {{host}}/plans
+
+### 3. Cria um cliente
+# @name customer
+POST {{host}}/customers
+Content-Type: application/json
+
+{
+  "name": "Ana Souza",
+  "email": "ana{{$timestamp}}@teste.com"
+}
+
+@customerId = {{customer.response.body.$.id}}
+
+### 4. Assina o plano (a primeira fatura e cobrada na hora)
+# @name subscription
+POST {{host}}/subscriptions
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "planId": "{{planId}}",
+  "paymentToken": "tok_ok"
+}
+
+@subscriptionId = {{subscription.response.body.$.id}}
+
+### 5. Ve as faturas da assinatura: a fatura esta OPEN e a tentativa PENDING, esperando o resultado do gateway
+# @name invoices
+GET {{host}}/subscriptions/{{subscriptionId}}/invoices
+
+@chargeId = {{invoices.response.body.$[0].attempts[0].chargeId}}
+
+### 6. Simula o gateway avisando que o pagamento foi aprovado (webhook assinado)
+### A assinatura e o HMAC-SHA256 do corpo com o segredo. O script abaixo funciona no HTTP Client do IntelliJ.
+### No VS Code, calcule com openssl (veja o README) e cole no header X-Signature.
+< {%
+    const body = JSON.stringify({
+        eventId: "evt_" + Date.now(),
+        type: "payment.succeeded",
+        chargeId: request.environment.get("chargeId")
+    });
+    request.variables.set("webhookBody", body);
+    request.variables.set("signature", "sha256=" + crypto.hmac.sha256()
+        .withTextSecret(request.environment.get("webhookSecret"))
+        .updateWithText(body)
+        .digest().toHex());
+%}
+POST {{host}}/webhooks/payments
+Content-Type: application/json
+X-Signature: {{signature}}
+
+{{webhookBody}}
+
+### 7. A fatura agora esta PAID
+GET {{host}}/subscriptions/{{subscriptionId}}/invoices
+
+### 8. Historico de cobrancas do cliente (todas as assinaturas, paginado)
+GET {{host}}/customers/{{customerId}}/invoices?page=0&size=10
+
+### 9. Webhook com assinatura errada: 401
+POST {{host}}/webhooks/payments
+Content-Type: application/json
+X-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{"eventId":"evt_x","type":"payment.succeeded","chargeId":"ch_x"}
+
+### 10. Assinatura com o gateway fora do ar (token especial): vira retry, nao erro
+POST {{host}}/subscriptions
+Content-Type: application/json
+
+{
+  "customerId": "{{customerId}}",
+  "planId": "{{planId}}",
+  "paymentToken": "tok_gateway_down"
+}
+
+### 11. Cancela a assinatura (pode repetir: cancelar duas vezes nao e erro)
+POST {{host}}/subscriptions/{{subscriptionId}}/cancel
+
+### 12. Dispara na mao o ciclo de cobranca e o retry (o que os jobs fazem sozinhos)
+POST {{host}}/admin/billing/run
+
+### 13. Saude da aplicacao
+GET {{host}}/actuator/health
